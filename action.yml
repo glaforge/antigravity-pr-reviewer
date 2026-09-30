@@ -43,18 +43,41 @@ runs:
         fi
         gh pr checkout "$PR_NUMBER" || true
 
-    - name: Run Review & Post
+    - name: Run AI Review
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MODEL_NAME: ${{ inputs.model_name }}
-        POST_COMMENT: ${{ inputs.post_comment }}
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        GITHUB_ACTION_PATH: ${{ github.action_path }}
-        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
-        gh pr diff $PR_NUMBER --repo $GH_REPO | jbang "${{ github.action_path }}/PrReviewer.java"
+        gh pr diff "$PR_NUMBER" --repo "$GH_REPO" | jbang "${{ github.action_path }}/PrReviewer.java" > review.json
+        if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+          jq -r '.body' review.json >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Post Review to Pull Request
+      if: inputs.post_comment == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        COMMENT_COUNT=$(jq '.comments // [] | length' review.json)
+        if [ -n "$HEAD_SHA" ] && [ "$COMMENT_COUNT" -gt 0 ]; then
+          echo "Submitting Pull Request Review with $COMMENT_COUNT inline comments via gh api..."
+          if jq --arg sha "$HEAD_SHA" '. + {commit_id: $sha, event: "COMMENT"}' review.json | \
+             gh api --method POST "/repos/$GH_REPO/pulls/$PR_NUMBER/reviews" --input -; then
+            echo "Review posted successfully."
+            exit 0
+          fi
+          echo "gh api review submission failed; falling back to standard comment..."
+        fi
+
+        echo "Posting review as PR issue comment..."
+        jq -r '.body' review.json | gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body-file -

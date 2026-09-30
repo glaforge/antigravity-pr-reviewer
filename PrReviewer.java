@@ -2,23 +2,17 @@
 //JAVA 25+
 //DEPS io.github.glaforge.antigravity:antigravity-sdk-wrapper:0.2.18
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.18.3
-//DEPS org.slf4j:slf4j-simple:2.0.18
 //FILES skills/pull-request-reviewer/SKILL.md
-//FILES simplelogger.properties
 //JAVA_OPTIONS --sun-misc-unsafe-memory-access=allow
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.glaforge.antigravity.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.util.*;
-
-Logger log = LoggerFactory.getLogger("PrReviewer");
-ObjectMapper mapper = new ObjectMapper();
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 record Review(String body, List<Comment> comments) {
     record Comment(String path, int line, String body) {}
@@ -36,28 +30,10 @@ void main(String[] args) {
             System.exit(1);
         }
 
-        String repo = System.getenv().getOrDefault("GITHUB_REPOSITORY", System.getenv().getOrDefault("GH_REPO", ""));
-        String pr = System.getenv().getOrDefault("PR_NUMBER", "");
-        String sha = System.getenv().getOrDefault("HEAD_SHA", System.getenv().getOrDefault("COMMIT_ID", ""));
-        String post = System.getenv().getOrDefault("POST_COMMENT", "true");
-        String dryRun = System.getenv().getOrDefault("DRY_RUN", "false");
-
         Review review = reviewDiff(diff);
-        IO.println(review.body());
-        log.info("Generated review with {} inline comment(s)", review.comments().size());
-
-        // Append to GitHub Step Summary if running inside GitHub Actions
-        String summaryPath = System.getenv("GITHUB_STEP_SUMMARY");
-        if (summaryPath != null && !summaryPath.isBlank()) {
-            Files.writeString(Path.of(summaryPath), review.body() + "\n\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        }
-
-        // Post review to GitHub if enabled and not in dry-run mode
-        if ("true".equalsIgnoreCase(post) && !"true".equalsIgnoreCase(dryRun) && !repo.isBlank() && !pr.isBlank()) {
-            postReview(repo, pr, sha, review);
-        }
+        new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(System.out, review);
     } catch (Exception e) {
-        log.error("Review failed: {}", e.getMessage(), e);
+        System.err.println("Review failed: " + e.getMessage());
         System.exit(1);
     }
 }
@@ -83,7 +59,7 @@ Review reviewDiff(String diff) throws Exception {
             .instructions("You are a Principal Software Engineer acting as a GitHub PR Reviewer.\n\n" + skill)
             .addPolicy(Policies.allowTools(BuiltinTools.VIEW_FILE.getValue(), BuiltinTools.LIST_DIR.getValue(), BuiltinTools.SEARCH_DIR.getValue()))
             .addPolicy(Policies.denyAll("Only read-only codebase inspection is allowed."))
-            .addOnToolErrorHook((call, err, ctx) -> CompletableFuture.completedFuture("Tool execution note: " + err.getMessage() + ". Please continue your review without this resource."))
+            .addOnToolErrorHook((call, err, ctx) -> CompletableFuture.completedFuture("Tool note: " + err.getMessage() + ". Continue review."))
             .addWorkspace(".")
             .build();
 
@@ -102,34 +78,5 @@ Review reviewDiff(String diff) throws Exception {
         AgentResponse response = agent.chatStream(prompt, chunk -> {}).get();
         Review review = response.getStructuredOutput(Review.class);
         return (review != null) ? review : new Review(response.text(), List.of());
-    }
-}
-
-void postReview(String repo, String pr, String sha, Review review) {
-    try {
-        // Attempt atomic Pull Request Review with inline comments if commit SHA is available
-        if (sha != null && !sha.isBlank() && !review.comments().isEmpty()) {
-            log.info("Submitting GitHub review with {} inline comments via gh api...", review.comments().size());
-            Map<String, Object> payload = Map.of(
-                    "commit_id", sha.trim(),
-                    "event", "COMMENT",
-                    "body", review.body(),
-                    "comments", review.comments()
-            );
-            Process p = new ProcessBuilder("gh", "api", "--method", "POST", "/repos/" + repo + "/pulls/" + pr + "/reviews", "--input", "-")
-                    .start();
-            p.getOutputStream().write(mapper.writeValueAsBytes(payload));
-            p.getOutputStream().close();
-            if (p.waitFor() == 0) {
-                log.info("GitHub review submitted successfully.");
-                return;
-            }
-            log.warn("gh api review submission failed. Falling back to PR comment.");
-        }
-        // Fallback to standard PR issue comment
-        log.info("Posting review as standard PR comment...");
-        new ProcessBuilder("gh", "pr", "comment", pr, "--repo", repo, "--body", review.body()).inheritIO().start().waitFor();
-    } catch (Exception e) {
-        log.warn("Could not post review: {}", e.getMessage());
     }
 }
