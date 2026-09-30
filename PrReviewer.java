@@ -44,6 +44,7 @@ void main(String[] args) {
 
         Review review = reviewDiff(diff);
         IO.println(review.body());
+        log.info("Generated review with {} inline comment(s)", review.comments().size());
 
         // Append to GitHub Step Summary if running inside GitHub Actions
         String summaryPath = System.getenv("GITHUB_STEP_SUMMARY");
@@ -78,16 +79,18 @@ Review reviewDiff(String diff) throws Exception {
     AgentConfig config = AgentConfig.builder()
             .modelName(model)
             .capabilities(caps)
+            .finishToolSchema(Review.class)
             .instructions("You are a Principal Software Engineer acting as a GitHub PR Reviewer.\n\n" + skill)
             .addPolicy(Policies.allowTools(BuiltinTools.VIEW_FILE.getValue(), BuiltinTools.LIST_DIR.getValue(), BuiltinTools.SEARCH_DIR.getValue()))
             .addPolicy(Policies.denyAll("Only read-only codebase inspection is allowed."))
+            .addOnToolErrorHook((call, err, ctx) -> CompletableFuture.completedFuture("Tool execution note: " + err.getMessage() + ". Please continue your review without this resource."))
             .addWorkspace(".")
             .build();
 
     String prompt = """
-            Perform an in-depth technical code review of this pull request according to the `pull-request-reviewer` skill.
-            Inspect the codebase using `view_file`, `list_directory`, and `search_directory` to verify callers and types.
-            Output your review STRICTLY as a JSON object adhering to the schema described in the skill.
+            Perform an in-depth technical code review of this pull request according to your instructions.
+            Inspect codebase files using `view_file`, `list_directory`, and `search_directory` to verify callers and types as needed.
+            Always return your review using the finish tool with both the markdown 'body' summary and line-specific 'comments'.
 
             ### Pull Request Diff
             ```diff
@@ -96,8 +99,9 @@ Review reviewDiff(String diff) throws Exception {
             """.formatted(diff.trim());
 
     try (Agent agent = new Agent(config)) {
-        String responseText = agent.chatStream(prompt, chunk -> {}).get().text();
-        return extractReview(responseText);
+        AgentResponse response = agent.chatStream(prompt, chunk -> {}).get();
+        Review review = response.getStructuredOutput(Review.class);
+        return (review != null) ? review : new Review(response.text(), List.of());
     }
 }
 
@@ -127,16 +131,5 @@ void postReview(String repo, String pr, String sha, Review review) {
         new ProcessBuilder("gh", "pr", "comment", pr, "--repo", repo, "--body", review.body()).inheritIO().start().waitFor();
     } catch (Exception e) {
         log.warn("Could not post review: {}", e.getMessage());
-    }
-}
-
-Review extractReview(String text) {
-    try {
-        int start = text.indexOf('{'), end = text.lastIndexOf('}');
-        String json = (start != -1 && end > start) ? text.substring(start, end + 1) : text.trim();
-        return mapper.readValue(json, Review.class);
-    } catch (Exception e) {
-        log.warn("Could not parse JSON review from model. Using raw text as summary.");
-        return new Review(text.trim(), List.of());
     }
 }
