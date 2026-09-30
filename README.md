@@ -124,3 +124,30 @@ Enforces a high-signal, concise review structure:
 3. **⚠️ Improvements & Suggestions**: Performance optimization, resource bounding, cache strategies.
 4. **✅ Test Coverage & Verification**: Concrete missing test scenarios (injection payloads, negative flows, concurrency tests).
 5. **🏁 Verdict**: Clear `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` with a one-sentence rationale.
+
+---
+
+## 💡 Inspirations & Prior Art
+
+This project brings together ideas and architectural patterns from several articles and open-source projects:
+
+- **Agentic PR Review with Antigravity SDK** by Remik Samborski:
+  - Article: [Building an Agentic PR Reviewer with Antigravity SDK](https://dev.to/googleai/building-an-agentic-pr-reviewer-with-antigravity-sdk-3b0i)
+  - GitHub: [rsamborski/run-agy-sdk](https://github.com/rsamborski/run-agy-sdk)
+  - *Inspiration*: Demonstrated how an Antigravity agent can autonomously explore a pre-cloned codebase using read-only inspection tools (`view_file`, `list_dir`, `grep_search`) to review pull requests in full context rather than looking at isolated diffs.
+
+- **Inline Reviews & One-Click Suggestions** by Darren Lester (Dazbo):
+  - Article: [Automated GitHub Code Reviews using Google Gemini](https://medium.com/google-cloud/automated-github-code-reviewsusing-google-gemini-7b4d027b3092)
+  - GitHub: [derailed-dash/gemini-review-action](https://github.com/derailed-dash/gemini-review-action)
+  - *Inspiration*: Pioneered the structured review pattern that maps LLM outputs to GitHub Pull Request Reviews (`gh api`), generating line-specific inline comments with native ````suggestion` blocks.
+
+- **Autonomous Agent Auditing with Antigravity 2.0** by Juan Guillermo Gómez:
+  - Article: [Building an Autonomous UI Agent Critic with the New Google Antigravity SDK 2.0](https://medium.com/google-cloud/building-an-autonomous-ui-agent-critic-with-the-new-google-antigravity-sdk-2-0-141232d21c4f)
+  - GitHub: [jggomez/ux-agent-audit](https://github.com/jggomez/ux-agent-audit)
+  - *Inspiration*: Illustrated how specialized personas and audit skills can be packaged and driven programmatically with the Antigravity SDK.
+
+- **Zero-Build Java Scripting**:
+  - [JBang](https://www.jbang.dev/) & [jbangdev/setup-jbang](https://github.com/jbangdev/setup-jbang): Eliminates build overhead and heavyweight JAR distribution in CI/CD by running clean, self-contained single-source scripts.
+  - [JEP 512](https://openjdk.org/jeps/512): Compact source files and instance main methods in Java 25+.
+  - [Antigravity Java SDK](https://github.com/glaforge/antigravity-java-sdk): Java SDK wrapper for Google Antigravity (`antigravity-sdk-wrapper`).
+
