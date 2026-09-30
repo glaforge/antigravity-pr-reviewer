@@ -12,14 +12,15 @@ Rather than shipping compiled JARs or maintaining heavyweight build systems and 
 
 - **Zero-Build Java Scripting via JBang**: `PrReviewer.java` is a standalone script declaring its own dependencies (`//DEPS`), file mounts (`//FILES`), and JVM flags. No Maven, Gradle, or compilation steps required.
 - **Diff Ingestion via Stdin or File**: Receives the git diff from standard input (`gh pr diff | jbang PrReviewer.java`) or as a file argument.
-- **Pure AI Review Engine**: Focuses entirely on what the Antigravity SDK does best:
+- **Structured Review Engine (Records + JSON)**: Enforces strict structured output modeled with Java 25 records. Captures file paths, target lines, severity levels, and ready-to-apply code suggestions.
+- **Diff Hunk Guardrails**: Automatically parses `@@ -l,s +l,s @@` hunks in the diff to ensure inline comments only target valid lines, demoting any out-of-hunk comments to general feedback to guarantee GitHub API acceptance.
+- **Atomic Inline Reviews with One-Click Suggestions**: Submits complete GitHub Pull Request Reviews with line-by-line comments and native ````suggestion` widgets via `gh api`, with graceful fallback to issue comments.
+- **Pure AI Review Engine with Airtight Security**:
   1. Resolves the `pull-request-reviewer` skill instructions.
   2. Inspects the codebase using **read-only tools** (`view_file`, `list_dir`, `grep_search`) against the pre-cloned workspace.
   3. Enforces an airtight **Read-Only Security Posture** with `Policies.denyAll()`: shell execution and file modification are blocked.
-  4. Generates a concise, direct, practical, and in-depth technical code review.
-- **Native GitHub Integration**: 
-  - Standard output and `$GITHUB_STEP_SUMMARY` for native GitHub Actions UI visualization.
-  - The standard GitHub CLI (`gh pr comment --body-file review.md`) handles posting to PRs using the workflow's built-in `GITHUB_TOKEN`.
+  4. The LLM agent **never sees or holds a GitHub token** (only the outer runner's `gh` CLI has it).
+- **Native GitHub Visualization**: Renders complete Markdown reports to `$GITHUB_STEP_SUMMARY` and stdout.
 
 ---
 
@@ -78,7 +79,10 @@ jobs:
 | :--- | :--- | :--- | :--- |
 | `gemini_api_key` | Gemini API key for Antigravity AI review | **Yes** | - |
 | `model_name` | Gemini model to use | No | `gemini-3.8-flash` |
-| `post_comment` | Whether to post review as a comment on the PR | No | `'true'` |
+| `post_comment` | Whether to post review to the pull request | No | `'true'` |
+| `review_mode` | `inline` (GitHub PR Review with inline comments) or `comment_only` | No | `'inline'` |
+| `review_event` | Review event type: `COMMENT` (default), `APPROVE`, or `REQUEST_CHANGES` | No | `'COMMENT'` |
+
 
 ---
 

@@ -1,5 +1,5 @@
 name: 'Antigravity Pull Request Reviewer'
-description: 'Automated, in-depth, technical pull request review powered by Antigravity Java SDK and JBang'
+description: 'Automated, in-depth, technical pull request review with inline comments and suggestions powered by Antigravity Java SDK and JBang'
 author: 'Guillaume Laforge'
 branding:
   icon: 'code'
@@ -14,9 +14,17 @@ inputs:
     required: false
     default: 'gemini-3.8-flash'
   post_comment:
-    description: 'Whether to post the review as a comment on the pull request'
+    description: 'Whether to post the review to the pull request'
     required: false
     default: 'true'
+  review_mode:
+    description: 'Review mode: inline (GitHub Pull Request Review with inline comments) or comment_only'
+    required: false
+    default: 'inline'
+  review_event:
+    description: 'Review event type: COMMENT (default), APPROVE, or REQUEST_CHANGES'
+    required: false
+    default: 'COMMENT'
 
 runs:
   using: 'composite'
@@ -45,22 +53,22 @@ runs:
         echo "Checking out PR #$PR_NUMBER..."
         gh pr checkout "$PR_NUMBER" || true
 
-    - name: Run Review & Post Comment
+    - name: Run Review & Post Review
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MODEL_NAME: ${{ inputs.model_name }}
         POST_COMMENT: ${{ inputs.post_comment }}
+        REVIEW_MODE: ${{ inputs.review_mode }}
+        REVIEW_EVENT: ${{ inputs.review_event }}
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_WORKSPACE: ${{ github.workspace }}
         GITHUB_ACTION_PATH: ${{ github.action_path }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_TITLE: ${{ github.event.pull_request.title }}
       run: |
-        gh pr diff $PR_NUMBER --repo $GH_REPO | jbang "${{ github.action_path }}/PrReviewer.java" > review.md
-        if [ "$POST_COMMENT" = "true" ]; then
-          gh pr comment $PR_NUMBER --repo $GH_REPO --body-file review.md
-        fi
+        gh pr diff $PR_NUMBER --repo $GH_REPO | jbang "${{ github.action_path }}/PrReviewer.java"
