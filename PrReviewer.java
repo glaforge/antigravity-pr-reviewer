@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.glaforge.antigravity.Agent;
 import io.github.glaforge.antigravity.AgentConfig;
 import io.github.glaforge.antigravity.AgentResponse;
+import io.github.glaforge.antigravity.BuiltinTools;
+import io.github.glaforge.antigravity.CapabilitiesConfig;
 import io.github.glaforge.antigravity.Policies;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -181,8 +183,19 @@ ReviewResult reviewDiff(String diff, Path workspaceDir) throws Exception {
             ```
             """.formatted(workspaceDir, context, diff.trim());
 
+    CapabilitiesConfig capabilities = CapabilitiesConfig.builder()
+            .enableViewFile(true)
+            .enableListDir(true)
+            .enableGrepSearch(true)
+            .enableShell(false)
+            .enableWriteFile(false)
+            .enableFileEdit(false)
+            .enableSubagents(false)
+            .build();
+
     AgentConfig config = AgentConfig.builder()
             .modelName(model)
+            .capabilities(capabilities)
             .instructions("""
                     You are a Principal Software Engineer acting as an automated GitHub Pull Request Reviewer.
 
@@ -190,11 +203,11 @@ ReviewResult reviewDiff(String diff, Path workspaceDir) throws Exception {
 
                     %s
 
-                    The repository is pre-cloned in your workspace. Use `view_file`, `list_dir`, and `grep_search` to inspect broader codebase context beyond the diff.
+                    The repository is pre-cloned in your workspace. Use `view_file`, `list_directory`, and `search_directory` to inspect broader codebase context beyond the diff.
                     Modifying repository files is strictly forbidden.
                     """.formatted(skillInstructions))
-            .addPolicy(Policies.allowTools("view_file", "list_dir", "grep_search"))
-            .addPolicy(Policies.denyAll("Only read-only codebase inspection (view_file, list_dir, grep_search) is allowed."))
+            .addPolicy(Policies.allowTools(BuiltinTools.VIEW_FILE.getValue(), BuiltinTools.LIST_DIR.getValue(), BuiltinTools.SEARCH_DIR.getValue()))
+            .addPolicy(Policies.denyAll("Only read-only codebase inspection is allowed."))
             .addWorkspace(workspaceDir.toString())
             .build();
 
@@ -484,29 +497,37 @@ Path prepareWorkspace(String repo, String prNumber) {
     }
 
     Path currentDir = Path.of(".").toAbsolutePath().normalize();
-    if (Files.exists(currentDir.resolve(".git"))) {
+    if (repo == null || repo.isBlank()) {
         return currentDir;
     }
 
-    if (repo != null && !repo.isBlank()) {
-        try {
-            Path tempDir = Files.createTempDirectory("pr-review-" + repo.replace('/', '_') + "-");
-            log.info("Cloning repository {} into temporary workspace {}...", repo, tempDir);
-            ProcessBuilder clonePb = new ProcessBuilder("gh", "repo", "clone", repo, tempDir.toString());
-            clonePb.inheritIO();
-            if (clonePb.start().waitFor() == 0) {
-                if (prNumber != null && !prNumber.isBlank()) {
-                    log.info("Checking out PR #{}...", prNumber);
-                    ProcessBuilder coPb = new ProcessBuilder("gh", "pr", "checkout", prNumber);
-                    coPb.directory(tempDir.toFile());
-                    coPb.inheritIO();
-                    coPb.start().waitFor();
-                }
-                return tempDir;
-            }
-        } catch (Exception e) {
-            log.warn("Could not clone repository beforehand: {}", e.getMessage());
+    // Check if current directory's git remote origin matches the requested repo
+    try {
+        Process p = new ProcessBuilder("git", "remote", "get-url", "origin").start();
+        String remote = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+        if (p.waitFor() == 0 && remote.contains(repo)) {
+            return currentDir;
         }
+    } catch (Exception ignored) {}
+
+    // Otherwise clone into a temporary workspace so the agent has the actual repository files
+    try {
+        Path tempDir = Files.createTempDirectory("pr-review-" + repo.replace('/', '_') + "-");
+        log.info("Cloning repository {} into temporary workspace {}...", repo, tempDir);
+        ProcessBuilder clonePb = new ProcessBuilder("gh", "repo", "clone", repo, tempDir.toString());
+        clonePb.inheritIO();
+        if (clonePb.start().waitFor() == 0) {
+            if (prNumber != null && !prNumber.isBlank()) {
+                log.info("Checking out PR #{}...", prNumber);
+                ProcessBuilder coPb = new ProcessBuilder("gh", "pr", "checkout", prNumber);
+                coPb.directory(tempDir.toFile());
+                coPb.inheritIO();
+                coPb.start().waitFor();
+            }
+            return tempDir;
+        }
+    } catch (Exception e) {
+        log.warn("Could not clone repository beforehand: {}", e.getMessage());
     }
 
     return currentDir;
