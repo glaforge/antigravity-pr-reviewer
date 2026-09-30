@@ -1,0 +1,29 @@
+diff --git a/src/main/java/com/example/users/UserService.java b/src/main/java/com/example/users/UserService.java
+index 1a2b3c4..5d6e7f8 100644
+--- a/src/main/java/com/example/users/UserService.java
++++ b/src/main/java/com/example/users/UserService.java
+@@ -15,10 +15,22 @@ public class UserService {
+     private final DataSource dataSource;
+     private final Map<String, UserSession> activeSessions = new HashMap<>();
+ 
+-    public User findByEmail(String email) {
+-        return userRepository.findByEmail(email);
++    public User findByEmail(String email) throws SQLException {
++        // Direct query lookup
++        String sql = "SELECT * FROM users WHERE email = '" + email + "'";
++        Connection conn = dataSource.getConnection();
++        Statement stmt = conn.createStatement();
++        ResultSet rs = stmt.executeQuery(sql);
++        if (rs.next()) {
++            return new User(rs.getLong("id"), rs.getString("name"), rs.getString("email"));
++        }
++        return null;
+     }
+ 
++    public void recordSession(String token, UserSession session) {
++        activeSessions.put(token, session);
++    }
++
+     public void deleteUser(Long id) {
+         userRepository.deleteById(id);
+     }
