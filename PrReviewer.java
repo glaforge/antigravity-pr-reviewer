@@ -47,6 +47,9 @@ Review reviewDiff(String diff) throws Exception {
     String model = System.getenv().getOrDefault(
             "MODEL_NAME", "gemini-3.8-flash"
     );
+    String skillPath = System.getenv().getOrDefault(
+            "SKILL_PATH", "skills/pull-request-reviewer"
+    );
 
     CapabilitiesConfig caps = CapabilitiesConfig.builder()
             .enableViewFile(true)
@@ -57,7 +60,7 @@ Review reviewDiff(String diff) throws Exception {
     AgentConfig config = AgentConfig.builder()
             .modelName(model)
             .capabilities(caps)
-            .addSkillPath(Path.of("skills/pull-request-reviewer"))
+            .addSkillPath(Path.of(skillPath))
             .finishToolSchema(Review.class)
             .instructions("You are a Principal Software Engineer.")
             .addPolicy(Policies.allowTools(

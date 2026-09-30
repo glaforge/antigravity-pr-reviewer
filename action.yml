@@ -49,6 +49,7 @@ runs:
       env:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MODEL_NAME: ${{ inputs.model_name }}
+        SKILL_PATH: ${{ github.action_path }}/skills/pull-request-reviewer
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}

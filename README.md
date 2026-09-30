@@ -8,19 +8,18 @@ Designed to run in **GitHub Actions** as a zero-build composite action or workfl
 
 ## 🎯 Architecture & Design Philosophy
 
-Rather than shipping compiled JARs or maintaining heavyweight build systems and GitHub client code, this tool embraces the **Unix philosophy**:
+Rather than shipping compiled JARs or maintaining heavyweight build systems and GitHub client code, this tool embraces a clean separation of concerns and the **Unix philosophy**:
 
-- **Zero-Build Java Scripting via JBang**: `PrReviewer.java` is a standalone script declaring its own dependencies (`//DEPS`), file mounts (`//FILES`), and JVM flags. No Maven, Gradle, or compilation steps required.
+- **Zero-Build Java Scripting via JBang**: `PrReviewer.java` is a lean (~95 lines) single-file Java 25 source script declaring its dependencies (`//DEPS`) and JVM flags. No Maven, Gradle, or compilation steps required.
 - **Diff Ingestion via Stdin or File**: Receives the git diff from standard input (`gh pr diff | jbang PrReviewer.java`) or as a file argument.
-- **Structured Review Engine (Records + JSON)**: Enforces strict structured output modeled with Java 25 records. Captures file paths, target lines, severity levels, and ready-to-apply code suggestions.
-- **Diff Hunk Guardrails**: Automatically parses `@@ -l,s +l,s @@` hunks in the diff to ensure inline comments only target valid lines, demoting any out-of-hunk comments to general feedback to guarantee GitHub API acceptance.
-- **Atomic Inline Reviews with One-Click Suggestions**: Submits complete GitHub Pull Request Reviews with line-by-line comments and native ````suggestion` widgets via `gh api`, with graceful fallback to issue comments.
+- **Structured Review Engine (Records + JSON)**: Enforces strict structured output modeled with Java 25 records (`Review` containing `body` markdown and line-specific `Comment` records). Outputs clean JSON to stdout.
+- **Skill-Driven Persona via Antigravity SDK**: Registers the `pull-request-reviewer` skill directly via `addSkillPath()`, giving the agent its review persona, security guidelines, and comment schemas.
+- **Offloaded Review Posting & Graceful Fallback**: Review submission is decoupled from Java and handled in `action.yml`. It uses `gh api` to post inline reviews with native ````suggestion` widgets, with automatic fallback to standard PR comments if inline lines cannot be placed.
 - **Pure AI Review Engine with Airtight Security**:
-  1. Resolves the `pull-request-reviewer` skill instructions.
-  2. Inspects the codebase using **read-only tools** (`view_file`, `list_dir`, `grep_search`) against the pre-cloned workspace.
-  3. Enforces an airtight **Read-Only Security Posture** with `Policies.denyAll()`: shell execution and file modification are blocked.
-  4. The LLM agent **never sees or holds a GitHub token** (only the outer runner's `gh` CLI has it).
-- **Native GitHub Visualization**: Renders complete Markdown reports to `$GITHUB_STEP_SUMMARY` and stdout.
+  1. Inspects the codebase using **read-only tools** (`view_file`, `list_dir`, `grep_search`) against the workspace.
+  2. Enforces an airtight **Read-Only Security Posture** with `Policies.denyAll()`: shell execution, file writes, and code modification are blocked.
+  3. The LLM agent **never sees or holds a GitHub token** (only the outer runner's `gh` CLI has it).
+- **Native GitHub Visualization**: Renders complete Markdown reports to `$GITHUB_STEP_SUMMARY` and structured JSON to stdout.
 
 ---
 
@@ -80,9 +79,6 @@ jobs:
 | `gemini_api_key` | Gemini API key for Antigravity AI review | **Yes** | - |
 | `model_name` | Gemini model to use | No | `gemini-3.8-flash` |
 | `post_comment` | Whether to post review to the pull request | No | `'true'` |
-| `review_mode` | `inline` (GitHub PR Review with inline comments) or `comment_only` | No | `'inline'` |
-| `review_event` | Review event type: `COMMENT` (default), `APPROVE`, or `REQUEST_CHANGES` | No | `'COMMENT'` |
-
 
 ---
 
@@ -90,24 +86,30 @@ jobs:
 
 Requires [JBang](https://www.jbang.dev/) (`curl -Ls https://sh.jbang.dev | bash` or `sdk install jbang`).
 
+`PrReviewer.java` outputs structured JSON (`{ "body": "...", "comments": [...] }`). You can inspect the full JSON with `jq` or extract the markdown review body directly with `jq -r .body`.
+
 ### 1. Pipe git diff directly via stdin
 
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
 
-git diff main...HEAD | jbang PrReviewer.java
+# Pretty-print complete JSON output (summary + inline comments)
+git diff main...HEAD | jbang PrReviewer.java | jq .
+
+# View only the markdown summary review
+git diff main...HEAD | jbang PrReviewer.java | jq -r .body
 ```
 
 ### 2. Review a local diff file
 
 ```bash
-jbang PrReviewer.java samples/sample.diff
+jbang PrReviewer.java samples/sample.diff | jq .
 ```
 
 ### 3. Review a live GitHub PR using the `gh` CLI
 
 ```bash
-gh pr diff 42 | jbang PrReviewer.java
+gh pr diff 42 | jbang PrReviewer.java | jq .
 ```
 
 ---
