@@ -17,14 +17,6 @@ inputs:
     description: 'Whether to post the review to the pull request'
     required: false
     default: 'true'
-  review_mode:
-    description: 'Review mode: inline (GitHub Pull Request Review with inline comments) or comment_only'
-    required: false
-    default: 'inline'
-  review_event:
-    description: 'Review event type: COMMENT (default), APPROVE, or REQUEST_CHANGES'
-    required: false
-    default: 'COMMENT'
 
 runs:
   using: 'composite'
@@ -47,28 +39,22 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         if [ ! -d ".git" ]; then
-          echo "Cloning repository $GH_REPO into workspace..."
           gh repo clone "$GH_REPO" .
         fi
-        echo "Checking out PR #$PR_NUMBER..."
         gh pr checkout "$PR_NUMBER" || true
 
-    - name: Run Review & Post Review
+    - name: Run Review & Post
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MODEL_NAME: ${{ inputs.model_name }}
         POST_COMMENT: ${{ inputs.post_comment }}
-        REVIEW_MODE: ${{ inputs.review_mode }}
-        REVIEW_EVENT: ${{ inputs.review_event }}
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
         GITHUB_REPOSITORY: ${{ github.repository }}
-        GITHUB_WORKSPACE: ${{ github.workspace }}
         GITHUB_ACTION_PATH: ${{ github.action_path }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
-        PR_TITLE: ${{ github.event.pull_request.title }}
       run: |
         gh pr diff $PR_NUMBER --repo $GH_REPO | jbang "${{ github.action_path }}/PrReviewer.java"

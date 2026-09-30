@@ -1,106 +1,35 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 25+
 //DEPS io.github.glaforge.antigravity:antigravity-sdk-wrapper:0.2.18
-//DEPS org.slf4j:slf4j-simple:2.0.18
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.18.3
+//DEPS org.slf4j:slf4j-simple:2.0.18
 //FILES skills/pull-request-reviewer/SKILL.md
 //FILES simplelogger.properties
 //JAVA_OPTIONS --sun-misc-unsafe-memory-access=allow
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.glaforge.antigravity.Agent;
-import io.github.glaforge.antigravity.AgentConfig;
-import io.github.glaforge.antigravity.AgentResponse;
-import io.github.glaforge.antigravity.BuiltinTools;
-import io.github.glaforge.antigravity.CapabilitiesConfig;
-import io.github.glaforge.antigravity.Policies;
+import io.github.glaforge.antigravity.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 Logger log = LoggerFactory.getLogger("PrReviewer");
-String SKILL_PATH = "skills/pull-request-reviewer/SKILL.md";
 ObjectMapper mapper = new ObjectMapper();
 
-@JsonIgnoreProperties(ignoreUnknown = true)
-record InlineComment(
-        String path,
-        int line,
-        Integer startLine,
-        String side,
-        String severity,
-        String commentText,
-        String codeSuggestion
-) {
-    public String effectiveSide() {
-        return (side != null && !side.isBlank()) ? side.toUpperCase() : "RIGHT";
-    }
-
-    public String effectiveSeverity() {
-        return (severity != null && !severity.isBlank()) ? severity.toUpperCase() : "MEDIUM";
-    }
+record Review(String body, List<Comment> comments) {
+    record Comment(String path, int line, String body) {}
+    public List<Comment> comments() { return comments != null ? comments : List.of(); }
 }
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-record ReviewResult(
-        String summary,
-        String verdict,
-        List<String> generalFeedback,
-        List<InlineComment> comments
-) {
-    public List<String> effectiveFeedback() {
-        return generalFeedback != null ? generalFeedback : List.of();
-    }
-
-    public List<InlineComment> effectiveComments() {
-        return comments != null ? comments : List.of();
-    }
-
-    public String effectiveVerdict() {
-        return (verdict != null && !verdict.isBlank()) ? verdict.toUpperCase() : "COMMENT";
-    }
-}
-
-@JsonInclude(JsonInclude.Include.NON_NULL)
-record GhReviewComment(
-        String path,
-        int line,
-        Integer start_line,
-        String side,
-        String start_side,
-        String body
-) {}
-
-@JsonInclude(JsonInclude.Include.NON_NULL)
-record GhReviewRequest(
-        String commit_id,
-        String body,
-        String event,
-        List<GhReviewComment> comments
-) {}
-
-record DiffLineKey(String path, int line, String side) {}
 
 void main(String[] args) {
     try {
-        String diff;
-        if (args.length > 0 && !args[0].isBlank()) {
-            diff = Files.readString(Path.of(args[0]));
-        } else {
-            diff = new String(System.in.readAllBytes(), StandardCharsets.UTF_8);
-        }
+        String diff = (args.length > 0 && !args[0].isBlank())
+                ? Files.readString(Path.of(args[0]))
+                : new String(System.in.readAllBytes(), StandardCharsets.UTF_8);
 
         if (diff.isBlank()) {
             System.err.println("No diff provided. Pass a diff file as an argument or pipe via stdin.");
@@ -108,43 +37,23 @@ void main(String[] args) {
         }
 
         String repo = System.getenv().getOrDefault("GITHUB_REPOSITORY", System.getenv().getOrDefault("GH_REPO", ""));
-        String prNumber = System.getenv().getOrDefault("PR_NUMBER", "");
-        String postComment = System.getenv().getOrDefault("POST_COMMENT", "true");
-        String reviewMode = System.getenv().getOrDefault("REVIEW_MODE", "inline");
-        String eventType = System.getenv().getOrDefault("REVIEW_EVENT", "COMMENT");
+        String pr = System.getenv().getOrDefault("PR_NUMBER", "");
+        String sha = System.getenv().getOrDefault("HEAD_SHA", System.getenv().getOrDefault("COMMIT_ID", ""));
+        String post = System.getenv().getOrDefault("POST_COMMENT", "true");
         String dryRun = System.getenv().getOrDefault("DRY_RUN", "false");
 
-        Path workspaceDir = prepareWorkspace(repo, prNumber);
-        log.info("Using workspace directory: {}", workspaceDir);
+        Review review = reviewDiff(diff);
+        IO.println(review.body());
 
-        Set<DiffLineKey> validHunkLines = parseDiffHunks(diff);
-        log.info("Parsed {} valid diff hunk lines across files in PR diff", validHunkLines.size());
-
-        ReviewResult reviewResult = reviewDiff(diff, workspaceDir);
-
-        String fullMarkdown = renderFullMarkdown(reviewResult);
-        IO.println(fullMarkdown);
-
-        // Write review.md file in current working directory
-        try {
-            Files.writeString(Path.of("review.md"), fullMarkdown);
-        } catch (Exception ignored) {}
-
-        // Append to GitHub Step Summary if running in GitHub Actions
-        String stepSummary = System.getenv("GITHUB_STEP_SUMMARY");
-        if (stepSummary != null && !stepSummary.isBlank()) {
-            Files.writeString(
-                    Path.of(stepSummary),
-                    fullMarkdown + "\n\n",
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.APPEND
-            );
+        // Append to GitHub Step Summary if running inside GitHub Actions
+        String summaryPath = System.getenv("GITHUB_STEP_SUMMARY");
+        if (summaryPath != null && !summaryPath.isBlank()) {
+            Files.writeString(Path.of(summaryPath), review.body() + "\n\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         }
 
-        // Post review to GitHub if enabled and not a dry run
-        if ("true".equalsIgnoreCase(postComment) && !"true".equalsIgnoreCase(dryRun) && !repo.isBlank() && !prNumber.isBlank()) {
-            String headSha = resolveHeadSha(workspaceDir);
-            submitReview(repo, prNumber, headSha, reviewResult, validHunkLines, reviewMode, eventType, fullMarkdown);
+        // Post review to GitHub if enabled and not in dry-run mode
+        if ("true".equalsIgnoreCase(post) && !"true".equalsIgnoreCase(dryRun) && !repo.isBlank() && !pr.isBlank()) {
+            postReview(repo, pr, sha, review);
         }
     } catch (Exception e) {
         log.error("Review failed: {}", e.getMessage(), e);
@@ -152,38 +61,11 @@ void main(String[] args) {
     }
 }
 
-ReviewResult reviewDiff(String diff, Path workspaceDir) throws Exception {
-    String skillInstructions = loadSkillInstructions();
-
+Review reviewDiff(String diff) throws Exception {
+    String skill = loadSkillInstructions();
     String model = System.getenv().getOrDefault("MODEL_NAME", "gemini-3.8-flash");
-    String prTitle = System.getenv().getOrDefault("PR_TITLE", "");
-    String prNumber = System.getenv().getOrDefault("PR_NUMBER", "");
-    String repo = System.getenv().getOrDefault("GITHUB_REPOSITORY", System.getenv().getOrDefault("GH_REPO", ""));
 
-    String context = (prTitle.isBlank() && prNumber.isBlank() && repo.isBlank()) ? "" : """
-            ### Pull Request Context
-            %s%s%s- **Workspace Directory**: %s
-            """.formatted(
-            repo.isBlank() ? "" : "- **Repository**: " + repo + "\n",
-            prNumber.isBlank() ? "" : "- **PR Number**: #" + prNumber + "\n",
-            prTitle.isBlank() ? "" : "- **Title**: " + prTitle + "\n",
-            workspaceDir);
-
-    String prompt = """
-            Please perform an in-depth technical code review of this pull request according to the `pull-request-reviewer` skill.
-
-            The repository is cloned and checked out at the PR state in your workspace directory: `%s`.
-            Use `view_file`, `list_dir`, and `grep_search` to inspect callers, types, interfaces, tests, and configuration files across the codebase to ensure an accurate, context-aware review.
-
-            Output your review STRICTLY as a JSON object adhering to the schema described in the skill.
-
-            %s### Pull Request Diff
-            ```diff
-            %s
-            ```
-            """.formatted(workspaceDir, context, diff.trim());
-
-    CapabilitiesConfig capabilities = CapabilitiesConfig.builder()
+    CapabilitiesConfig caps = CapabilitiesConfig.builder()
             .enableViewFile(true)
             .enableListDir(true)
             .enableGrepSearch(true)
@@ -195,360 +77,80 @@ ReviewResult reviewDiff(String diff, Path workspaceDir) throws Exception {
 
     AgentConfig config = AgentConfig.builder()
             .modelName(model)
-            .capabilities(capabilities)
-            .instructions("""
-                    You are a Principal Software Engineer acting as an automated GitHub Pull Request Reviewer.
-
-                    Apply the following skill instructions for all reviews:
-
-                    %s
-
-                    The repository is pre-cloned in your workspace. Use `view_file`, `list_directory`, and `search_directory` to inspect broader codebase context beyond the diff.
-                    Modifying repository files is strictly forbidden.
-                    """.formatted(skillInstructions))
+            .capabilities(caps)
+            .instructions("You are a Principal Software Engineer acting as a GitHub PR Reviewer.\n\n" + skill)
             .addPolicy(Policies.allowTools(BuiltinTools.VIEW_FILE.getValue(), BuiltinTools.LIST_DIR.getValue(), BuiltinTools.SEARCH_DIR.getValue()))
             .addPolicy(Policies.denyAll("Only read-only codebase inspection is allowed."))
-            .addWorkspace(workspaceDir.toString())
+            .addWorkspace(".")
             .build();
 
+    String prompt = """
+            Perform an in-depth technical code review of this pull request according to the `pull-request-reviewer` skill.
+            Inspect the codebase using `view_file`, `list_directory`, and `search_directory` to verify callers and types.
+            Output your review STRICTLY as a JSON object adhering to the schema described in the skill.
+
+            ### Pull Request Diff
+            ```diff
+            %s
+            ```
+            """.formatted(diff.trim());
+
     try (Agent agent = new Agent(config)) {
-        CompletableFuture<AgentResponse> future = agent.chatStream(prompt, chunk -> {});
-        AgentResponse response = future.get(180, TimeUnit.SECONDS);
-
-        if (response.usageMetadata() != null) {
-            log.info("Token usage - Prompt: {}, Output: {}, Total: {}",
-                    response.usageMetadata().promptTokenCount(),
-                    response.usageMetadata().candidatesTokenCount(),
-                    response.usageMetadata().totalTokenCount());
-        }
-
-        return parseReviewResult(response.text());
+        String responseText = agent.chatStream(prompt, chunk -> {}).get().text();
+        return extractReview(responseText);
     }
 }
 
-ReviewResult parseReviewResult(String rawText) {
-    String json = extractJson(rawText);
+void postReview(String repo, String pr, String sha, Review review) {
     try {
-        return mapper.readValue(json, ReviewResult.class);
-    } catch (Exception e) {
-        log.warn("Failed to deserialize structured JSON review ({}). Falling back to text summary.", e.getMessage());
-        return new ReviewResult(
-                rawText.trim(),
-                "COMMENT",
-                List.of(),
-                List.of()
-        );
-    }
-}
-
-String extractJson(String text) {
-    if (text == null || text.isBlank()) {
-        return "{}";
-    }
-    Pattern fencePattern = Pattern.compile("```(?:json)?\\s*\\n([\\s\\S]*?)\\n```", Pattern.CASE_INSENSITIVE);
-    Matcher matcher = fencePattern.matcher(text);
-    if (matcher.find()) {
-        return matcher.group(1).trim();
-    }
-    int start = text.indexOf('{');
-    int end = text.lastIndexOf('}');
-    if (start != -1 && end != -1 && end > start) {
-        return text.substring(start, end + 1).trim();
-    }
-    return text.trim();
-}
-
-Set<DiffLineKey> parseDiffHunks(String diff) {
-    Set<DiffLineKey> validKeys = new HashSet<>();
-    String currentPath = null;
-    Pattern filePattern = Pattern.compile("^\\+\\+\\+\\s+b/(.*)$");
-    Pattern hunkPattern = Pattern.compile("^@@\\s+-(\\d+)(?:,(\\d+))?\\s+\\+(\\d+)(?:,(\\d+))?\\s+@@");
-
-    for (String line : diff.split("\r?\n")) {
-        Matcher fileMatcher = filePattern.matcher(line);
-        if (fileMatcher.find()) {
-            currentPath = fileMatcher.group(1).trim();
-            continue;
-        }
-
-        if (currentPath != null) {
-            Matcher hunkMatcher = hunkPattern.matcher(line);
-            if (hunkMatcher.find()) {
-                int leftStart = Integer.parseInt(hunkMatcher.group(1));
-                int leftCount = hunkMatcher.group(2) != null ? Integer.parseInt(hunkMatcher.group(2)) : 1;
-                for (int i = 0; i < leftCount; i++) {
-                    validKeys.add(new DiffLineKey(currentPath, leftStart + i, "LEFT"));
-                }
-
-                int rightStart = Integer.parseInt(hunkMatcher.group(3));
-                int rightCount = hunkMatcher.group(4) != null ? Integer.parseInt(hunkMatcher.group(4)) : 1;
-                for (int i = 0; i < rightCount; i++) {
-                    validKeys.add(new DiffLineKey(currentPath, rightStart + i, "RIGHT"));
-                }
-            }
-        }
-    }
-    return validKeys;
-}
-
-String resolveHeadSha(Path workspaceDir) {
-    String headSha = System.getenv("HEAD_SHA");
-    if (headSha != null && !headSha.isBlank()) {
-        return headSha.trim();
-    }
-    headSha = System.getenv("COMMIT_ID");
-    if (headSha != null && !headSha.isBlank()) {
-        return headSha.trim();
-    }
-    if (workspaceDir != null) {
-        try {
-            Process p = new ProcessBuilder("git", "rev-parse", "HEAD")
-                    .directory(workspaceDir.toFile())
+        // Attempt atomic Pull Request Review with inline comments if commit SHA is available
+        if (sha != null && !sha.isBlank() && !review.comments().isEmpty()) {
+            log.info("Submitting GitHub review with {} inline comments via gh api...", review.comments().size());
+            Map<String, Object> payload = Map.of(
+                    "commit_id", sha.trim(),
+                    "event", "COMMENT",
+                    "body", review.body(),
+                    "comments", review.comments()
+            );
+            Process p = new ProcessBuilder("gh", "api", "--method", "POST", "/repos/" + repo + "/pulls/" + pr + "/reviews", "--input", "-")
                     .start();
-            String sha = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-            if (p.waitFor() == 0 && !sha.isBlank()) {
-                return sha;
+            p.getOutputStream().write(mapper.writeValueAsBytes(payload));
+            p.getOutputStream().close();
+            if (p.waitFor() == 0) {
+                log.info("GitHub review submitted successfully.");
+                return;
             }
-        } catch (Exception ignored) {}
-    }
-    return null;
-}
-
-void submitReview(
-        String repo,
-        String prNumber,
-        String headSha,
-        ReviewResult result,
-        Set<DiffLineKey> validHunkLines,
-        String reviewMode,
-        String eventType,
-        String fullMarkdown
-) {
-    // If comment_only mode requested, or headSha is unavailable, post a general PR issue comment
-    if ("comment_only".equalsIgnoreCase(reviewMode) || headSha == null || headSha.isBlank()) {
-        if (headSha == null || headSha.isBlank()) {
-            log.info("HEAD SHA not available. Falling back to issue comment.");
+            log.warn("gh api review submission failed. Falling back to PR comment.");
         }
-        postIssueComment(repo, prNumber, fullMarkdown);
-        return;
-    }
-
-    try {
-        GhReviewRequest ghRequest = buildGhReviewRequest(headSha, result, validHunkLines, eventType);
-        String requestJson = mapper.writeValueAsString(ghRequest);
-
-        log.info("Submitting GitHub Pull Request Review via gh api ({} inline comment(s))...", ghRequest.comments().size());
-
-        ProcessBuilder pb = new ProcessBuilder(
-                "gh", "api",
-                "--method", "POST",
-                "/repos/" + repo + "/pulls/" + prNumber + "/reviews",
-                "--input", "-"
-        );
-        Process p = pb.start();
-        try (var out = p.getOutputStream()) {
-            out.write(requestJson.getBytes(StandardCharsets.UTF_8));
-        }
-
-        int exitCode = p.waitFor();
-        String errorOutput = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        if (exitCode == 0) {
-            log.info("GitHub Pull Request Review submitted successfully!");
-        } else {
-            log.warn("gh api review submission failed (exit {}): {}. Falling back to issue comment.", exitCode, errorOutput);
-            postIssueComment(repo, prNumber, fullMarkdown);
-        }
+        // Fallback to standard PR issue comment
+        log.info("Posting review as standard PR comment...");
+        new ProcessBuilder("gh", "pr", "comment", pr, "--repo", repo, "--body", review.body()).inheritIO().start().waitFor();
     } catch (Exception e) {
-        log.warn("Exception during gh api review submission: {}. Falling back to issue comment.", e.getMessage());
-        postIssueComment(repo, prNumber, fullMarkdown);
+        log.warn("Could not post review: {}", e.getMessage());
     }
 }
 
-GhReviewRequest buildGhReviewRequest(
-        String commitId,
-        ReviewResult result,
-        Set<DiffLineKey> validHunkLines,
-        String eventType
-) {
-    List<GhReviewComment> ghComments = new ArrayList<>();
-    List<String> deferredFeedback = new ArrayList<>(result.effectiveFeedback());
-
-    for (InlineComment c : result.effectiveComments()) {
-        String side = c.effectiveSide();
-        DiffLineKey key = new DiffLineKey(c.path(), c.line(), side);
-
-        // Guardrail: if line is not within the PR diff hunks, demote to general feedback to prevent API rejection
-        if (!validHunkLines.isEmpty() && !validHunkLines.contains(key)) {
-            deferredFeedback.add("📌 **%s** (line %d, outside diff): %s".formatted(c.path(), c.line(), c.commentText()));
-            continue;
-        }
-
-        String icon = switch (c.effectiveSeverity()) {
-            case "CRITICAL" -> "🔴";
-            case "HIGH" -> "🟠";
-            case "MEDIUM" -> "🟡";
-            default -> "🟢";
-        };
-
-        StringBuilder body = new StringBuilder();
-        body.append(icon).append(" **").append(c.effectiveSeverity()).append("**: ").append(c.commentText().trim());
-        if (c.codeSuggestion() != null && !c.codeSuggestion().isBlank()) {
-            body.append("\n\n```suggestion\n").append(c.codeSuggestion().stripTrailing()).append("\n```");
-        }
-
-        ghComments.add(new GhReviewComment(
-                c.path(),
-                c.line(),
-                c.startLine(),
-                side,
-                c.startLine() != null ? side : null,
-                body.toString()
-        ));
-    }
-
-    String summaryMarkdown = renderReviewSummaryBody(result.summary(), result.effectiveVerdict(), deferredFeedback);
-    String event = (eventType != null && !eventType.isBlank()) ? eventType : "COMMENT";
-
-    return new GhReviewRequest(commitId, summaryMarkdown, event, ghComments);
-}
-
-void postIssueComment(String repo, String prNumber, String markdownBody) {
+Review extractReview(String text) {
     try {
-        log.info("Posting review as standard PR comment via gh pr comment...");
-        ProcessBuilder pb = new ProcessBuilder(
-                "gh", "pr", "comment", prNumber,
-                "--repo", repo,
-                "--body", markdownBody
-        );
-        pb.inheritIO();
-        int code = pb.start().waitFor();
-        if (code == 0) {
-            log.info("PR comment posted successfully.");
-        } else {
-            log.error("Failed to post PR comment (exit code {})", code);
-        }
+        int start = text.indexOf('{'), end = text.lastIndexOf('}');
+        String json = (start != -1 && end > start) ? text.substring(start, end + 1) : text.trim();
+        return mapper.readValue(json, Review.class);
     } catch (Exception e) {
-        log.error("Failed to post issue comment: {}", e.getMessage(), e);
+        log.warn("Could not parse JSON review from model. Using raw text as summary.");
+        return new Review(text.trim(), List.of());
     }
-}
-
-String renderReviewSummaryBody(String summary, String verdict, List<String> feedback) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("## 🤖 AI Pull Request Review\n\n");
-    sb.append("**Verdict:** `").append(verdict).append("`\n\n");
-    sb.append("### 📋 Summary\n\n").append(summary.trim()).append("\n\n");
-
-    if (!feedback.isEmpty()) {
-        sb.append("### 💡 General Feedback & Observations\n\n");
-        for (String item : feedback) {
-            sb.append("- ").append(item.trim()).append("\n");
-        }
-        sb.append("\n");
-    }
-
-    return sb.toString();
-}
-
-String renderFullMarkdown(ReviewResult result) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("## 🤖 AI Pull Request Review\n\n");
-    sb.append("**Verdict:** `").append(result.effectiveVerdict()).append("`\n\n");
-    sb.append("### 📋 Summary\n\n").append(result.summary().trim()).append("\n\n");
-
-    if (!result.effectiveFeedback().isEmpty()) {
-        sb.append("### 💡 General Feedback\n\n");
-        for (String item : result.effectiveFeedback()) {
-            sb.append("- ").append(item.trim()).append("\n");
-        }
-        sb.append("\n");
-    }
-
-    List<InlineComment> comments = result.effectiveComments();
-    if (!comments.isEmpty()) {
-        sb.append("### 🔍 Inline Comments & Code Suggestions (").append(comments.size()).append(")\n\n");
-        for (InlineComment c : comments) {
-            String icon = switch (c.effectiveSeverity()) {
-                case "CRITICAL" -> "🔴";
-                case "HIGH" -> "🟠";
-                case "MEDIUM" -> "🟡";
-                default -> "🟢";
-            };
-            sb.append("#### ").append(icon).append(" `").append(c.path()).append(":").append(c.line()).append("` (").append(c.effectiveSeverity()).append(")\n\n");
-            sb.append(c.commentText().trim()).append("\n\n");
-            if (c.codeSuggestion() != null && !c.codeSuggestion().isBlank()) {
-                sb.append("```suggestion\n").append(c.codeSuggestion().stripTrailing()).append("\n```\n\n");
-            }
-        }
-    } else {
-        sb.append("✅ *No inline code issues detected.*\n\n");
-    }
-
-    return sb.toString();
-}
-
-Path prepareWorkspace(String repo, String prNumber) {
-    String githubWorkspace = System.getenv("GITHUB_WORKSPACE");
-    if (githubWorkspace != null && !githubWorkspace.isBlank()) {
-        Path path = Path.of(githubWorkspace).toAbsolutePath().normalize();
-        if (Files.exists(path)) {
-            return path;
-        }
-    }
-
-    Path currentDir = Path.of(".").toAbsolutePath().normalize();
-    if (repo == null || repo.isBlank()) {
-        return currentDir;
-    }
-
-    // Check if current directory's git remote origin matches the requested repo
-    try {
-        Process p = new ProcessBuilder("git", "remote", "get-url", "origin").start();
-        String remote = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        if (p.waitFor() == 0 && remote.contains(repo)) {
-            return currentDir;
-        }
-    } catch (Exception ignored) {}
-
-    // Otherwise clone into a temporary workspace so the agent has the actual repository files
-    try {
-        Path tempDir = Files.createTempDirectory("pr-review-" + repo.replace('/', '_') + "-");
-        log.info("Cloning repository {} into temporary workspace {}...", repo, tempDir);
-        ProcessBuilder clonePb = new ProcessBuilder("gh", "repo", "clone", repo, tempDir.toString());
-        clonePb.inheritIO();
-        if (clonePb.start().waitFor() == 0) {
-            if (prNumber != null && !prNumber.isBlank()) {
-                log.info("Checking out PR #{}...", prNumber);
-                ProcessBuilder coPb = new ProcessBuilder("gh", "pr", "checkout", prNumber);
-                coPb.directory(tempDir.toFile());
-                coPb.inheritIO();
-                coPb.start().waitFor();
-            }
-            return tempDir;
-        }
-    } catch (Exception e) {
-        log.warn("Could not clone repository beforehand: {}", e.getMessage());
-    }
-
-    return currentDir;
 }
 
 String loadSkillInstructions() throws IOException {
-    Path local = Path.of(SKILL_PATH);
-    if (Files.exists(local)) {
-        return Files.readString(local);
-    }
+    Path local = Path.of("skills/pull-request-reviewer/SKILL.md");
+    if (Files.exists(local)) return Files.readString(local);
     String actionPath = System.getenv("GITHUB_ACTION_PATH");
     if (actionPath != null && !actionPath.isBlank()) {
-        Path fromAction = Path.of(actionPath, SKILL_PATH);
-        if (Files.exists(fromAction)) {
-            return Files.readString(fromAction);
-        }
+        Path fromAction = Path.of(actionPath, "skills/pull-request-reviewer/SKILL.md");
+        if (Files.exists(fromAction)) return Files.readString(fromAction);
     }
-    try (var is = getClass().getResourceAsStream("/" + SKILL_PATH)) {
-        if (is != null) {
-            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-        }
+    try (var is = getClass().getResourceAsStream("/skills/pull-request-reviewer/SKILL.md")) {
+        if (is != null) return new String(is.readAllBytes(), StandardCharsets.UTF_8);
     }
-    throw new IllegalStateException("Skill 'pull-request-reviewer' not found at " + SKILL_PATH);
+    throw new IllegalStateException("Skill 'pull-request-reviewer' not found");
 }

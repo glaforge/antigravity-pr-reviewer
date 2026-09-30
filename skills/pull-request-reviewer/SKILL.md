@@ -54,24 +54,16 @@ Your review must be **concise, direct, practical, and deeply technical**.
 
 ## Output Structure
 
-You MUST output your review strictly as a valid JSON object (optionally wrapped in a ```json code block) adhering to the following schema:
+You MUST output your review strictly as a valid JSON object (optionally wrapped in a ```json code block) adhering directly to the GitHub Review payload schema:
 
 ```json
 {
-  "summary": "A compact 2 to 3 sentence overview summarizing what changed technically and evaluating the blast radius / regression risk.",
-  "verdict": "COMMENT",
-  "generalFeedback": [
-    "High-level architectural feedback, positive highlights, test coverage evaluation, or notes not tied to a specific line."
-  ],
+  "body": "## 🤖 AI Pull Request Review\\n\\n**Verdict:** `REQUEST_CHANGES`\\n\\n### 📋 Summary & Blast Radius\\nA compact 2 to 3 sentence overview summarizing what changed technically and evaluating the blast radius.\\n\\n### 💡 General Feedback\\n- Observation 1: Architectural feedback, positive highlights, or test coverage notes.",
   "comments": [
     {
       "path": "path/to/file.ext",
       "line": 42,
-      "startLine": null,
-      "side": "RIGHT",
-      "severity": "HIGH",
-      "commentText": "Concise explanation of the issue, defect, or vulnerability and its concrete impact.",
-      "codeSuggestion": "exact replacement code ready to apply"
+      "body": "🔴 **CRITICAL**: Concise explanation of the defect and why it is an issue.\\n\\n```suggestion\\nexact replacement code\\n```"
     }
   ]
 }
@@ -79,19 +71,14 @@ You MUST output your review strictly as a valid JSON object (optionally wrapped 
 
 ### JSON Field Rules
 
-1. **`summary`**: A concise executive summary of the PR, key changes, and regression risks.
-2. **`verdict`**: Must be exactly one of: `"COMMENT"`, `"APPROVE"`, or `"REQUEST_CHANGES"`. Use `"COMMENT"` by default unless the PR has critical blocking flaws (`"REQUEST_CHANGES"`) or is completely verified and ready (`"APPROVE"`).
-3. **`generalFeedback`**: List of strings containing observations, overall architecture critique, or test coverage gaps.
-4. **`comments`**: Array of line-specific inline review comments:
+1. **`body`**: A complete, beautifully formatted GitHub-flavored markdown report containing:
+   - `**Verdict:**` (one of: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`).
+   - `### 📋 Summary & Blast Radius`: High-level summary of changes and regression risks.
+   - `### 💡 General Feedback`: Bullet points for architectural feedback, cross-file impact, security notes, and test coverage gaps.
+2. **`comments`**: Array of line-specific inline review comments:
    - **`path`**: Exact relative file path as shown in the diff (e.g. `src/main/java/Foo.java`).
-   - **`line`**: The target line number in the diff. Must be a line in the modified file (RIGHT side).
-   - **`startLine`**: Optional. If `codeSuggestion` replaces multiple lines, set `startLine` to the first line and `line` to the last line of the replaced range. For single-line comments, set `startLine` to `null`.
-   - **`side`**: `"RIGHT"` for additions/modifications (default) or `"LEFT"` for comments on deleted lines.
-   - **`severity`**: Must be one of: `"CRITICAL"`, `"HIGH"`, `"MEDIUM"`, `"LOW"`.
-   - **`commentText`**: Technical explanation of the issue and why it needs fixing. Do not repeat the code suggestion here.
-   - **`codeSuggestion`**: Optional string containing the exact replacement code.
-     - **CRITICAL**: Do NOT include markdown fences, line numbers, or diff prefixes (`+` or `-`).
-     - Indentation and whitespace must align perfectly with the target file.
-     - Set to `null` if the comment is an advisory note without a direct code replacement.
-5. If no issues are found, return `"comments": []` and appropriate `"generalFeedback"`.
+   - **`line`**: The target line number in the modified version of the file (RIGHT side of the diff). MUST be on a changed line.
+   - **`body`**: The comment content. Include severity icon and label (`🔴 **CRITICAL**`, `🟠 **HIGH**`, `🟡 **MEDIUM**`, `🟢 **LOW**`), the technical issue explanation, and optionally a ````suggestion` code block for one-click merging.
+3. If no inline code issues exist, set `"comments": []`.
+
 
