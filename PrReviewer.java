@@ -62,7 +62,7 @@ void main(String[] args) {
 }
 
 Review reviewDiff(String diff) throws Exception {
-    String skill = loadSkillInstructions();
+    String skill = new String(getClass().getResourceAsStream("/SKILL.md").readAllBytes(), StandardCharsets.UTF_8);
     String model = System.getenv().getOrDefault("MODEL_NAME", "gemini-3.8-flash");
 
     CapabilitiesConfig caps = CapabilitiesConfig.builder()
@@ -139,18 +139,4 @@ Review extractReview(String text) {
         log.warn("Could not parse JSON review from model. Using raw text as summary.");
         return new Review(text.trim(), List.of());
     }
-}
-
-String loadSkillInstructions() throws IOException {
-    Path local = Path.of("skills/pull-request-reviewer/SKILL.md");
-    if (Files.exists(local)) return Files.readString(local);
-    String actionPath = System.getenv("GITHUB_ACTION_PATH");
-    if (actionPath != null && !actionPath.isBlank()) {
-        Path fromAction = Path.of(actionPath, "skills/pull-request-reviewer/SKILL.md");
-        if (Files.exists(fromAction)) return Files.readString(fromAction);
-    }
-    try (var is = getClass().getResourceAsStream("/skills/pull-request-reviewer/SKILL.md")) {
-        if (is != null) return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-    }
-    throw new IllegalStateException("Skill 'pull-request-reviewer' not found");
 }
