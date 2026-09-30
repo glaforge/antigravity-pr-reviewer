@@ -2,7 +2,6 @@
 //JAVA 25+
 //DEPS io.github.glaforge.antigravity:antigravity-sdk-wrapper:0.2.18
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.18.3
-//FILES skills/pull-request-reviewer/SKILL.md
 //JAVA_OPTIONS --sun-misc-unsafe-memory-access=allow
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,10 +44,6 @@ void main(String[] args) {
 }
 
 Review reviewDiff(String diff) throws Exception {
-    String skill = new String(
-            getClass().getResourceAsStream("/SKILL.md").readAllBytes(),
-            UTF_8
-    );
     String model = System.getenv().getOrDefault(
             "MODEL_NAME", "gemini-3.8-flash"
     );
@@ -62,8 +57,9 @@ Review reviewDiff(String diff) throws Exception {
     AgentConfig config = AgentConfig.builder()
             .modelName(model)
             .capabilities(caps)
+            .addSkillPath(Path.of("skills/pull-request-reviewer"))
             .finishToolSchema(Review.class)
-            .instructions("You are a Principal Software Engineer.\n\n" + skill)
+            .instructions("You are a Principal Software Engineer.")
             .addPolicy(Policies.allowTools(
                     BuiltinTools.VIEW_FILE.getValue(),
                     BuiltinTools.LIST_DIR.getValue(),
