@@ -1,5 +1,7 @@
 # GitHub Pull Request Reviewer
 
+[![AI Pull Request Reviewer](https://github.com/glaforge/antigravity-pr-reviewer/actions/workflows/pr-review.yml/badge.svg)](https://github.com/glaforge/antigravity-pr-reviewer/actions/workflows/pr-review.yml)
+
 An automated, in-depth, production-grade Pull Request Reviewer built with the **Antigravity Java SDK** (`io.github.glaforge.antigravity:antigravity-sdk-wrapper:0.2.18`), Gemini models, and **JBang**.
 
 Designed to run in **GitHub Actions** as a zero-build composite action or workflow, and locally via the command line with standard Unix pipes.
