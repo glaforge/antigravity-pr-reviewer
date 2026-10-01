@@ -1,5 +1,5 @@
 name: 'Antigravity Pull Request Reviewer'
-description: 'Automated, in-depth, technical pull request review with inline comments and suggestions powered by Antigravity Java SDK and JBang'
+description: 'Automated AI pull request reviews with inline suggestions powered by Antigravity Java SDK and Gemini'
 author: 'Guillaume Laforge'
 branding:
   icon: 'code'
