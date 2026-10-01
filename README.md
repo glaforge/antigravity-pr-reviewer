@@ -38,6 +38,7 @@ github-pr-reviewer/
 ├── action.yml                          # Composite GitHub Action descriptor
 ├── PrReviewer.java                     # Executable JBang script (Java 25+ JEP 512 compact source file)
 ├── simplelogger.properties             # SLF4J logging configuration (clean stderr output)
+├── LICENSE
 └── README.md
 ```
 
@@ -150,4 +151,19 @@ This project brings together ideas and architectural patterns from several artic
   - [JBang](https://www.jbang.dev/) & [jbangdev/setup-jbang](https://github.com/jbangdev/setup-jbang): Eliminates build overhead and heavyweight JAR distribution in CI/CD by running clean, self-contained single-source scripts.
   - [JEP 512](https://openjdk.org/jeps/512): Compact source files and instance main methods in Java 25+.
   - [Antigravity Java SDK](https://github.com/glaforge/antigravity-java-sdk): Java SDK wrapper for Google Antigravity (`antigravity-sdk-wrapper`).
+
+---
+
+## 📄 License
+
+This project is licensed under the [Apache License, Version 2.0](LICENSE).
+
+Copyright 2026 Google LLC.
+
+---
+
+## ⚠️ Disclaimer
+
+This is not an official Google project. It is not an officially supported Google product.
+
 
