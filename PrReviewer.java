@@ -1,6 +1,6 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 25+
-//DEPS io.github.glaforge.antigravity:antigravity-sdk-wrapper:0.2.18
+//DEPS io.github.glaforge.antigravity:antigravity-sdk-wrapper:0.2.22
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.18.3
 //JAVA_OPTIONS --sun-misc-unsafe-memory-access=allow
 
