@@ -4,6 +4,7 @@
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.18.3
 //JAVA_OPTIONS --sun-misc-unsafe-memory-access=allow
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.glaforge.antigravity.*;
 
@@ -14,7 +15,9 @@ import java.util.List;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 record Review(String body, List<Comment> comments) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record Comment(String path, int line, String body) {}
     public List<Comment> comments() {
         return comments != null ? comments : List.of();
